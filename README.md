@@ -12,10 +12,7 @@ from pathlib import Path
 try:
     from cryptography.fernet import Fernet, InvalidToken
 except ImportError:
-    print("Error: Missing 'cryptography' module. Install it by running:")
-    print("  pip install cryptography")
-    print("Or, if using Anaconda:")
-    print("  conda install cryptography")
+    print("Error: Missing 'cryptography' module. Install it by running: pip install cryptography")
     sys.exit(1)
 import hashlib
 import base64
@@ -48,7 +45,6 @@ def debug_environment() -> None:
     logger.debug(f"Platform: {platform.platform()}")
     logger.debug(f"Current directory: {os.getcwd()}")
     logger.debug(f"Python executable: {sys.executable}")
-    logger.debug(f"Path environment: {os.environ.get('PATH', 'Not set')}")
 
 # Crypto Utilities
 def validate_password_strength(password: str) -> None:
@@ -130,7 +126,7 @@ def parse_file_header(data: bytes, config: Dict[str, Any]) -> Tuple[bytes, bytes
 # Core Functions
 def encrypt_data(password: str, payload: Any, out_path: str, config: Dict[str, Any]) -> None:
     """Encrypt and save JSON payload to file."""
-    out_path = str(Path(out_path).resolve())  # Resolve absolute path
+    out_path = str(Path(out_path).resolve())
     payload_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     
     try:
@@ -152,11 +148,6 @@ def encrypt_data(password: str, payload: Any, out_path: str, config: Dict[str, A
 
     tmp_dir = os.path.dirname(out_path)
     Path(tmp_dir).mkdir(parents=True, exist_ok=True)
-    
-    # Check disk space (rough estimate)
-    statvfs = os.statvfs(tmp_dir) if hasattr(os, 'statvfs') else None
-    if statvfs and statvfs.f_bavail * statvfs.f_frsize < len(full_blob) * 2:
-        raise OSError("Insufficient disk space for writing file")
     
     fd, tmp_path = tempfile.mkstemp(prefix=".tmp_fortknox_", dir=tmp_dir)
     try:
@@ -245,8 +236,13 @@ def build_config_from_args(args: argparse.Namespace) -> Dict[str, Any]:
     cfg["COMPRESS"] = not args.no_compress
     return cfg
 
-def safe_getpass(prompt: str) -> str:
-    """Get password, falling back to input() if getpass fails."""
+def safe_getpass(prompt: str, non_interactive: bool = False) -> str:
+    """Get password, falling back to input() if getpass fails or non-interactive mode."""
+    if non_interactive:
+        # For CI: Use env var or default mock password
+        password = os.environ.get("FORT_KNOX_PASSWORD", "TestPass123!")
+        logger.info("Using non-interactive mode with mock password")
+        return password
     try:
         return getpass(prompt, stream=sys.stderr)
     except (EOFError, KeyboardInterrupt, Exception) as e:
@@ -269,6 +265,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--no-compress", action="store_true", help="Disable compression")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with environment info")
+    parser.add_argument("--non-interactive", action="store_true", help="Use mock password for CI/testing (sets FORT_KNOX_PASSWORD env var)")
     
     try:
         args = parser.parse_args(argv)
@@ -291,7 +288,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         if args.action == "encrypt":
-            password = safe_getpass("Enter encryption password: ")
+            password = safe_getpass("Enter encryption password: ", args.non_interactive)
             if not password:
                 logger.error("Password cannot be empty")
                 return 3
@@ -304,7 +301,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         elif args.action == "decrypt":
-            password = safe_getpass("Enter decryption password: ")
+            password = safe_getpass("Enter decryption password: ", args.non_interactive)
             if not password:
                 logger.error("Password cannot be empty")
                 return 3
